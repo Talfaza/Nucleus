@@ -15,3 +15,7 @@ Automatic Test Server Maker
 - Docker 
 - K8S
 
+## Main Features : 
+- Create Test Servers On Demand
+- Delete Them After A Certain Period Of Time
+- Create Linux Containers For Lightweight Testing 
