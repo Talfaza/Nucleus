@@ -12,6 +12,7 @@ Automatic Test Server Maker
 - Promox ( vm & lxc for lightweight test server )
 - AWS Ec2
 - MySQL & Redis
+- Github Actions
 - Docker 
 - K8S
 
