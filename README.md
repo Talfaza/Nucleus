@@ -23,4 +23,4 @@ Nucleus diagrams and mockups
 
 ![image](assets/class_diag.png)
 
-> Needs to be developped i will modifyit along with the project
+> Needs to be developped i will modify it along with the project
