@@ -1,11 +1,10 @@
 # Nucleus
-Automatic Test Server Maker 
-## System Design 
-![image](https://github.com/user-attachments/assets/3e08f2dc-080c-4e00-a856-2e97147abd2a)
+
+Automatic Test Server Maker
 
 ## Techno
 
-- React 
+- React
 - RabbitMQ
 - Ansible
 - Microservices ( mainly go)
@@ -13,10 +12,11 @@ Automatic Test Server Maker
 - AWS Ec2
 - MySQL & Redis
 - Github Actions
-- Docker 
+- Docker
 - K8S
 
-## Main Features : 
+## Main Features :
+
 - Create Test Servers On Demand
 - Delete Them After A Certain Period Of Time
-- Create Linux Containers For Lightweight Testing 
+- Create Linux Containers For Lightweight Testing
