@@ -15,6 +15,12 @@ Nucleus diagrams and mockups
 
 ## Uml
 
-### use Case
+### Use Case
 
 ![image](assets/use_case.png)
+
+### Class Diagram
+
+![image](assets/class_diag.png)
+
+> Needs to be developped i will modifyit along with the project
