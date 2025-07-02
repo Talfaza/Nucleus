@@ -24,9 +24,12 @@ jobs:
 
       - name: Build Go Code
         run: go build ./...
+        working-directory: authentification
 
       - name: Run Tests
         run: go test -v ./...
+        working-directory: authentification
+
 
   merge-to-main:
     name: Merge Into Main
