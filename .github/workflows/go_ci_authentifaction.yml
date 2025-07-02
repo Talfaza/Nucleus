@@ -4,7 +4,10 @@ on:
   push:
     branches:
       - 'feature/authentification'
-
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
 jobs:
   build-test-go:
     name: Build & Test Go 
