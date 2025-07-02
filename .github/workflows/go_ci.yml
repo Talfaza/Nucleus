@@ -3,7 +3,7 @@ name: Go CI
 on:
   push:
     branches:
-      - 'feature/**'
+      - 'feature/authentification'
 
 jobs:
   build-test-go:
