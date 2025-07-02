@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"github.com/Talfaza/authentification/database"
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"os"
