@@ -3,6 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Nucleus",
+  description: "Awesome Website",
 };
 
 export default function RootLayout({
