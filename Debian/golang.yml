@@ -1,0 +1,23 @@
+---
+- name: Install Go (Golang)
+  hosts: lxcs
+  become: true
+  tasks:
+    - name: Download Go tarball
+      get_url:
+        url: https://go.dev/dl/go1.21.1.linux-amd64.tar.gz
+        dest: /tmp/go.tar.gz
+        mode: "0644"
+
+    - name: Extract Go archive
+      unarchive:
+        src: /tmp/go.tar.gz
+        dest: /usr/local
+        remote_src: yes
+
+    - name: Ensure /usr/local/go/bin is in PATH
+      lineinfile:
+        path: /etc/profile.d/go.sh
+        line: "export PATH=$PATH:/usr/local/go/bin"
+        create: yes
+        state: present

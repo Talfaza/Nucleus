@@ -1,0 +1,23 @@
+---
+- name: Install Node.js
+  hosts: lxcs
+  become: true
+  tasks:
+    - name: Add NodeSource repo key
+      apt_key:
+        url: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
+        state: present
+
+    - name: Add NodeSource repo
+      apt_repository:
+        repo: "deb https://deb.nodesource.com/node_20.x {{ ansible_distribution_release }} main"
+        state: present
+
+    - name: Update cache
+      apt:
+        update_cache: yes
+
+    - name: Install nodejs
+      apt:
+        name: nodejs
+        state: present

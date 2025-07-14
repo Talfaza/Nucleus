@@ -1,0 +1,16 @@
+---
+- name: Install Apache
+  hosts: lxcs
+  become: true
+  tasks:
+    - name: Install apache2 package
+      apt:
+        name: apache2
+        state: present
+        update_cache: yes
+
+    - name: Ensure Apache running and enabled
+      service:
+        name: apache2
+        state: started
+        enabled: yes
