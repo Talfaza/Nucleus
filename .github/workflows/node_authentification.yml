@@ -3,7 +3,7 @@ name: Node CI
 on:
   push:
     branches:
-      - 'feature/authentification'
+      - 'feature/serverCreation'
     paths:
       - '**/*.ts'
       - '**/*.tsx'
@@ -27,11 +27,11 @@ jobs:
 
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
-        working-directory: authentification
+        working-directory: create-server 
 
       - name: Compile TypeScript
         run: npx tsc
-        working-directory: authentification
+        working-directory: create-server 
 
   merge-to-main:
     name: Merge Into Main

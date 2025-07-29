@@ -484,8 +484,6 @@ export default function CreateServerPage() {
                       <SelectContent className="bg-slate-800 border-slate-700 z-50">
                         <SelectItem value="1">1 Core</SelectItem>
                         <SelectItem value="2">2 Cores</SelectItem>
-                        <SelectItem value="4">4 Cores</SelectItem>
-                        <SelectItem value="8">8 Cores</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
