@@ -38,6 +38,7 @@ export default function AuthPage() {
     try {
       await axios.post(
         "http://localhost:9872/auth/login",
+        // TODO: Add it in a env file
         {
           email: loginEmail,
           password: loginPassword,
