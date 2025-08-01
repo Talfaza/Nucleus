@@ -24,11 +24,11 @@ jobs:
 
       - name: Build Go Code
         run: go build ./...
-        working-directory: authentification
+        working-directory: nucleus 
 
       - name: Run Tests
         run: go test -v ./...
-        working-directory: authentification
+        working-directory: nucleus 
 
 
   merge-to-main:

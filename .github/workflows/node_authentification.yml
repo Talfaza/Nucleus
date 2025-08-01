@@ -27,11 +27,11 @@ jobs:
 
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
-        working-directory: authentification
+        working-directory: nucleus 
 
       - name: Compile TypeScript
         run: npx tsc
-        working-directory: authentification
+        working-directory: nucleus 
 
   merge-to-main:
     name: Merge Into Main
