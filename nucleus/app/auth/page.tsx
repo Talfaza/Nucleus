@@ -45,7 +45,7 @@ export default function AuthPage() {
         },
         { validateStatus: (status) => status >= 200 && status < 300 },
       );
-      router.push("/");
+      router.push("/create-server");
     } catch (err: any) {
       setLoginError("Login failed");
     }
