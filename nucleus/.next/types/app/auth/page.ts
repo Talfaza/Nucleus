@@ -1,4 +1,4 @@
-// File: /home/talfaza/Nucleus/authentification/app/auth/page.tsx
+// File: /home/talfaza/dev/Nucleus/nucleus/app/auth/page.tsx
 import * as entry from '../../../../app/auth/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 
