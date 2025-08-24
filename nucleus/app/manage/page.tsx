@@ -1,11 +1,13 @@
 "use client"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Server, ArrowLeft, PlusCircle, Trash2, HardDrive, Zap, Edit } from "lucide-react"
+import { Server, ArrowLeft, PlusCircle, Trash2, HardDrive, Zap, Edit, Play, Power, Eye } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 import { ProxmoxServerModal } from "@/components/proxmox-server-modal"
+import { AuthGuard, useAuth } from "@/components/auth-guard"
+import axios from "axios"
 
 interface ServerItem {
   id: string
@@ -16,37 +18,548 @@ interface ServerItem {
   username?: string
 }
 
-export default function ManageServersPage() {
-  const [servers, setServers] = useState<ServerItem[]>([
-    { id: "srv-1", name: "My First Test Server", type: "Nucleus Server", details: "Ubuntu 22.04, Python, Node.js" },
-    { id: "srv-2", name: "Dev Environment", type: "Nucleus Server", details: "Debian 11, Docker, Nginx" },
-    {
-      id: "prox-1",
-      name: "Proxmox Host 01",
-      type: "Proxmox Server",
-      details: "192.168.1.100",
-      url: "https://192.168.1.100:8006",
-      username: "root@pam",
-    },
-  ])
+interface ProxConfig {
+  ID: number
+  user_id: number
+  server_name: string
+  username: string
+  host: string
+  port: string
+  password: string
+  CreatedAt: string
+  UpdatedAt: string
+}
+
+interface LXCConfig {
+  ID: number
+  user_id: number
+  name: string
+  packages: string // JSON string
+  CreatedAt: string
+  UpdatedAt: string
+}
+
+function ManageServersPageContent() {
+  const [servers, setServers] = useState<ServerItem[]>([])
   const [isProxmoxModalOpen, setIsProxmoxModalOpen] = useState(false)
   const [editingProxmoxServer, setEditingProxmoxServer] = useState<ServerItem | null>(null)
   const [isLoadingAddEdit, setIsLoadingAddEdit] = useState(false)
   const [isLoadingDelete, setIsLoadingDelete] = useState<string | null>(null)
+  const [isLoadingShutdown, setIsLoadingShutdown] = useState<string | null>(null)
+  const [isLoadingStart, setIsLoadingStart] = useState<string | null>(null)
+  const [isLoadingData, setIsLoadingData] = useState(true)
   const { toast } = useToast()
+
+  // Load LXC servers and Proxmox servers
+  useEffect(() => {
+    const loadServers = async () => {
+      try {
+        // LXC servers
+        const lxcRes = await axios.get('http://localhost:7402/lxc', { withCredentials: true })
+        const lxcConfigs: LXCConfig[] = lxcRes.data
+        const lxcServers: ServerItem[] = lxcConfigs.map(cfg => ({
+          id: `lxc-${cfg.ID}`,
+          name: cfg.name,
+          type: "Nucleus Server" as const,
+          details: (() => {
+            try {
+              const obj = JSON.parse(cfg.packages || '{}') as Record<string, string>
+              const entries = Object.entries(obj)
+              if (entries.length === 0) return undefined
+              // Show up to 3 packages
+              return entries.slice(0, 3).map(([k, v]) => `${k}:${v}`).join(', ')
+            } catch { return undefined }
+          })(),
+        }))
+
+        const response = await axios.get('http://localhost:7790/prox', {
+          withCredentials: true,
+        })
+        
+        const proxConfigs: ProxConfig[] = response.data
+        const proxServers: ServerItem[] = proxConfigs.map(config => ({
+          id: `prox-${config.ID}`,
+          name: config.server_name || `${config.username}@${config.host}`,
+          type: "Proxmox Server" as const,
+          details: `${config.host}:${config.port}`,
+          url: `https://${config.host}:${config.port}`,
+          username: config.username,
+        }))
+        
+        setServers([...lxcServers, ...proxServers])
+      } catch (error) {
+        console.error('Failed to load servers:', error)
+        toast({
+          title: "Error",
+          description: "Failed to load servers",
+          className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
+        })
+      } finally {
+        setIsLoadingData(false)
+      }
+    }
+
+    loadServers()
+  }, [])
 
   const handleDeleteServer = async (id: string, name: string) => {
     setIsLoadingDelete(id)
-    // Simulate API call
-    setTimeout(() => {
-      setServers((prev) => prev.filter((server) => server.id !== id))
-      setIsLoadingDelete(null)
+    
+    try {
+      const server = servers.find(s => s.id === id)
+      
+      if (server?.type === "Proxmox Server") {
+        // Delete from backend
+        const configId = id.replace('prox-', '')
+        await axios.delete(`http://localhost:7790/prox/${configId}`, {
+          withCredentials: true,
+        })
+        
+        // Remove from frontend state
+        setServers((prev) => prev.filter((server) => server.id !== id))
+        toast({
+          title: "Proxmox Server Deleted! 🗑️",
+          description: `Proxmox server "${name}" has been successfully removed.`,
+          className: "bg-blue-600/20 backdrop-blur-sm text-white border-blue-500/30",
+        })
+      } else if (server?.type === "Nucleus Server") {
+        // For LXC servers, we need to destroy the actual container first
+        try {
+          // Get Proxmox server details
+          const proxRes = await axios.get('http://localhost:7790/prox', { withCredentials: true })
+          const proxConfigs: ProxConfig[] = proxRes.data
+          
+          if (proxConfigs.length === 0) {
+            throw new Error('No Proxmox server configured')
+          }
+          
+          const proxConfig = proxConfigs[0] // Use the first Proxmox server
+          
+          // Get all LXC containers and grep for the VMID
+          const listCommand = `pct list`
+          const grepCommand = `pct list | grep "${name}"`
+          
+          console.log('Searching for container with name:', name)
+          console.log('Using command:', grepCommand)
+          
+          const findResponse = await axios.post('http://localhost:7789/execute', {
+            host: proxConfig.host.replace('https://', '').replace(':8006', ''),
+            port: "22",
+            username: proxConfig.username,
+            password: proxConfig.password,
+            command: grepCommand,
+          }, { withCredentials: false })
+          
+          const containerLine = findResponse.data.output?.trim()
+          console.log('Found container line:', containerLine)
+          
+          // Extract VMID from the first column
+          const containerId = containerLine ? containerLine.split(/\s+/)[0] : null
+          console.log('Extracted container ID:', containerId)
+          
+          if (containerId && containerId.match(/^\d+$/)) {
+            // First shut down the LXC container gracefully
+            const shutdownCommand = `pct shutdown ${containerId}`
+            
+            try {
+              await axios.post('http://localhost:7789/execute', {
+                host: proxConfig.host.replace('https://', '').replace(':8006', ''),
+                port: "22",
+                username: proxConfig.username,
+                password: proxConfig.password,
+                command: shutdownCommand,
+              }, { withCredentials: false })
+              
+              console.log(`LXC container ${containerId} shutdown initiated`)
+              
+              // Wait a moment for shutdown to complete
+              await new Promise(resolve => setTimeout(resolve, 3000))
+            } catch (shutdownError) {
+              console.log(`Shutdown failed for container ${containerId}, proceeding with force destroy`)
+            }
+            
+            // Then destroy the LXC container
+            const destroyCommand = `pct destroy ${containerId} --force`
+            
+            await axios.post('http://localhost:7789/execute', {
+              host: proxConfig.host.replace('https://', '').replace(':8006', ''),
+              port: "22",
+              username: proxConfig.username,
+              password: proxConfig.password,
+              command: destroyCommand,
+            }, { withCredentials: false })
+            
+            console.log(`LXC container ${containerId} destroyed successfully`)
+          } else {
+            console.log('No LXC container found with that name, proceeding with config deletion only')
+          }
+        } catch (lxcError) {
+          console.error('Error destroying LXC container:', lxcError)
+          // Continue with config deletion even if container destruction fails
+        }
+        
+        // Delete the configuration from lxc-service
+        const configId = id.replace('lxc-', '')
+        await axios.delete(`http://localhost:7402/lxc/${configId}`, {
+          withCredentials: true,
+        })
+        
+        // Play delete sound
+        try {
+          console.log('Playing delete sound...')
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+          const oscillator = audioContext.createOscillator()
+          const gainNode = audioContext.createGain()
+          
+          oscillator.connect(gainNode)
+          gainNode.connect(audioContext.destination)
+          
+          // Quick descending tone for delete
+          oscillator.frequency.setValueAtTime(1000, audioContext.currentTime)
+          oscillator.frequency.setValueAtTime(800, audioContext.currentTime + 0.1)
+          oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.2)
+          
+          gainNode.gain.setValueAtTime(0.8, audioContext.currentTime)
+          gainNode.gain.exponentialRampToValueAtTime(0.1, audioContext.currentTime + 0.3)
+          
+          oscillator.start(audioContext.currentTime)
+          oscillator.stop(audioContext.currentTime + 0.3)
+          
+          console.log('Delete sound played successfully')
+        } catch (error) {
+          console.log('Could not play delete sound:', error)
+        }
+        
+        // Remove from frontend state
+        setServers((prev) => prev.filter((server) => server.id !== id))
+        toast({
+          title: "Nucleus Server Deleted! 🗑️",
+          description: `Nucleus server "${name}" and its LXC container have been successfully removed.`,
+          className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
+        })
+      }
+    } catch (error) {
+      console.error('Failed to delete server:', error)
       toast({
-        title: "Server Deleted! 🗑️",
-        description: `Server "${name}" has been successfully removed.`,
-        className: "bg-blue-600/20 backdrop-blur-sm text-white border-blue-500/30",
+        title: "Error",
+        description: "Failed to delete server",
+        className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
       })
-    }, 1000)
+    } finally {
+      setIsLoadingDelete(null)
+    }
+  }
+
+  const handleShutdownServer = async (id: string, name: string) => {
+    setIsLoadingShutdown(id)
+    
+    try {
+      const server = servers.find(s => s.id === id)
+      
+      if (server?.type === "Nucleus Server") {
+        // Get Proxmox server details
+        const proxRes = await axios.get('http://localhost:7790/prox', { withCredentials: true })
+        const proxConfigs: ProxConfig[] = proxRes.data
+        
+        if (proxConfigs.length === 0) {
+          throw new Error('No Proxmox server configured')
+        }
+        
+        const proxConfig = proxConfigs[0] // Use the first Proxmox server
+        
+        // Get all LXC containers and grep for the VMID
+        const grepCommand = `pct list | grep "${name}"`
+        
+        console.log('Searching for container to shutdown:', name)
+        console.log('Using command:', grepCommand)
+        
+        const findResponse = await axios.post('http://localhost:7789/execute', {
+          host: proxConfig.host.replace('https://', '').replace(':8006', ''),
+          port: "22",
+          username: proxConfig.username,
+          password: proxConfig.password,
+          command: grepCommand,
+        }, { withCredentials: false })
+        
+        const containerLine = findResponse.data.output?.trim()
+        console.log('Found container line:', containerLine)
+        
+        // Extract VMID from the first column
+        const containerId = containerLine ? containerLine.split(/\s+/)[0] : null
+        console.log('Extracted container ID for shutdown:', containerId)
+        
+        if (containerId && containerId.match(/^\d+$/)) {
+          // Shut down the LXC container gracefully
+          const shutdownCommand = `pct shutdown ${containerId}`
+          
+          await axios.post('http://localhost:7789/execute', {
+            host: proxConfig.host.replace('https://', '').replace(':8006', ''),
+            port: "22",
+            username: proxConfig.username,
+            password: proxConfig.password,
+            command: shutdownCommand,
+          }, { withCredentials: false })
+          
+          console.log(`LXC container ${containerId} shutdown initiated`)
+          
+          // Play shutdown sound
+          try {
+            console.log('Playing shutdown sound...')
+            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+            const oscillator = audioContext.createOscillator()
+            const gainNode = audioContext.createGain()
+            
+            oscillator.connect(gainNode)
+            gainNode.connect(audioContext.destination)
+            
+            // Descending tone for shutdown
+            oscillator.frequency.setValueAtTime(1200, audioContext.currentTime)
+            oscillator.frequency.setValueAtTime(1000, audioContext.currentTime + 0.1)
+            oscillator.frequency.setValueAtTime(800, audioContext.currentTime + 0.2)
+            oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.3)
+            
+            gainNode.gain.setValueAtTime(0.8, audioContext.currentTime)
+            gainNode.gain.exponentialRampToValueAtTime(0.1, audioContext.currentTime + 0.4)
+            
+            oscillator.start(audioContext.currentTime)
+            oscillator.stop(audioContext.currentTime + 0.4)
+            
+            console.log('Shutdown sound played successfully')
+          } catch (error) {
+            console.log('Could not play shutdown sound:', error)
+          }
+          
+          toast({
+            title: "Server Shutdown! ⏹️",
+            description: `Nucleus server "${name}" is being shut down gracefully.`,
+            className: "bg-yellow-600/20 backdrop-blur-sm text-white border-yellow-500/30",
+          })
+        } else {
+          toast({
+            title: "Container Not Found",
+            description: `Could not find LXC container for server "${name}"`,
+            className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Failed to shutdown server:', error)
+      toast({
+        title: "Error",
+        description: "Failed to shutdown server",
+        className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
+      })
+    } finally {
+      setIsLoadingShutdown(null)
+    }
+  }
+
+  const handleStartServer = async (id: string, name: string) => {
+    setIsLoadingStart(id)
+    
+    try {
+      const server = servers.find(s => s.id === id)
+      
+      if (server?.type === "Nucleus Server") {
+        // Get Proxmox server details
+        const proxRes = await axios.get('http://localhost:7790/prox', { withCredentials: true })
+        const proxConfigs: ProxConfig[] = proxRes.data
+        
+        if (proxConfigs.length === 0) {
+          throw new Error('No Proxmox server configured')
+        }
+        
+        const proxConfig = proxConfigs[0] // Use the first Proxmox server
+        
+        // Get all LXC containers and grep for the VMID
+        const grepCommand = `pct list | grep "${name}"`
+        
+        console.log('Searching for container to start:', name)
+        console.log('Using command:', grepCommand)
+        
+        const findResponse = await axios.post('http://localhost:7789/execute', {
+          host: proxConfig.host.replace('https://', '').replace(':8006', ''),
+          port: "22",
+          username: proxConfig.username,
+          password: proxConfig.password,
+          command: grepCommand,
+        }, { withCredentials: false })
+        
+        const containerLine = findResponse.data.output?.trim()
+        console.log('Found container line:', containerLine)
+        
+        // Extract VMID from the first column
+        const containerId = containerLine ? containerLine.split(/\s+/)[0] : null
+        console.log('Extracted container ID for start:', containerId)
+        
+        if (containerId && containerId.match(/^\d+$/)) {
+          // Start the LXC container
+          const startCommand = `pct start ${containerId}`
+          
+          await axios.post('http://localhost:7789/execute', {
+            host: proxConfig.host.replace('https://', '').replace(':8006', ''),
+            port: "22",
+            username: proxConfig.username,
+            password: proxConfig.password,
+            command: startCommand,
+          }, { withCredentials: false })
+          
+          console.log(`LXC container ${containerId} start initiated`)
+          
+          // Play start sound
+          try {
+            console.log('Playing start sound...')
+            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+            const oscillator = audioContext.createOscillator()
+            const gainNode = audioContext.createGain()
+            
+            oscillator.connect(gainNode)
+            gainNode.connect(audioContext.destination)
+            
+            // Ascending tone for start
+            oscillator.frequency.setValueAtTime(600, audioContext.currentTime)
+            oscillator.frequency.setValueAtTime(800, audioContext.currentTime + 0.1)
+            oscillator.frequency.setValueAtTime(1000, audioContext.currentTime + 0.2)
+            oscillator.frequency.setValueAtTime(1200, audioContext.currentTime + 0.3)
+            
+            gainNode.gain.setValueAtTime(0.8, audioContext.currentTime)
+            gainNode.gain.exponentialRampToValueAtTime(0.1, audioContext.currentTime + 0.4)
+            
+            oscillator.start(audioContext.currentTime)
+            oscillator.stop(audioContext.currentTime + 0.4)
+            
+            console.log('Start sound played successfully')
+          } catch (error) {
+            console.log('Could not play start sound:', error)
+          }
+          
+          toast({
+            title: "Server Started! ▶️",
+            description: `Nucleus server "${name}" is starting up.`,
+            className: "bg-blue-600/20 backdrop-blur-sm text-white border-blue-500/30",
+          })
+        } else {
+          toast({
+            title: "Container Not Found",
+            description: `Could not find LXC container for server "${name}"`,
+            className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Failed to start server:', error)
+      toast({
+        title: "Error",
+        description: "Failed to start server",
+        className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
+      })
+    } finally {
+      setIsLoadingStart(null)
+    }
+  }
+
+  const handleOpenShell = async (id: string, name: string) => {
+    try {
+      const server = servers.find(s => s.id === id)
+      
+      if (server?.type === "Nucleus Server") {
+        // Get Proxmox server details
+        const proxRes = await axios.get('http://localhost:7790/prox', { withCredentials: true })
+        const proxConfigs: ProxConfig[] = proxRes.data
+        
+        if (proxConfigs.length === 0) {
+          throw new Error('No Engine server configured')
+        }
+        
+        const proxConfig = proxConfigs[0] // Use the first Proxmox server
+        
+        // Get all LXC containers and grep for the VMID
+        const grepCommand = `pct list | grep "${name}"`
+        
+        console.log('Searching for container to open shell:', name)
+        console.log('Using command:', grepCommand)
+        
+        const findResponse = await axios.post('http://localhost:7789/execute', {
+          host: proxConfig.host.replace('https://', '').replace(':8006', ''),
+          port: "22",
+          username: proxConfig.username,
+          password: proxConfig.password,
+          command: grepCommand,
+        }, { withCredentials: false })
+        
+        const containerLine = findResponse.data.output?.trim()
+        console.log('Found container line:', containerLine)
+        
+        // Extract VMID from the first column
+        const containerId = containerLine ? containerLine.split(/\s+/)[0] : null
+        console.log('Extracted container ID for shell:', containerId)
+        
+        if (containerId && containerId.match(/^\d+$/)) {
+          // Get the actual hostname from Proxmox server using SSH
+          const hostnameCommand = `hostname`
+          
+          try {
+            const hostnameResponse = await axios.post('http://localhost:7789/execute', {
+              host: proxConfig.host.replace('https://', '').replace(':8006', ''),
+              port: "22",
+              username: proxConfig.username,
+              password: proxConfig.password,
+              command: hostnameCommand,
+            }, { withCredentials: false })
+            
+            const actualHostname = hostnameResponse.data.output?.trim()
+            console.log('Engine hostname:', actualHostname)
+            
+            // Use the actual hostname, fallback to IP if command fails
+            const nodeName = actualHostname || proxConfig.host.replace('https://', '').replace(':8006', '')
+            
+            // Construct the Proxmox console URL
+            const consoleUrl = `https://${proxConfig.host.replace('https://', '').replace(':8006', '')}:8006/?console=lxc&xtermjs=1&vmid=${containerId}&vmname=${encodeURIComponent(name)}&node=${nodeName}&cmd=`
+            
+            console.log(`Opening Proxmox console: ${consoleUrl}`)
+            
+            // Open the console in a new tab
+            window.open(consoleUrl, '_blank')
+            
+            toast({
+              title: "Console Opened! 🖥️",
+              description: `Engine console opened for container ${containerId} in a new tab.`,
+              className: "bg-cyan-600/20 backdrop-blur-sm text-white border-cyan-500/30",
+            })
+            
+          } catch (hostnameError) {
+            console.error('Failed to get hostname, using IP address:', hostnameError)
+            
+            // Fallback: use IP address as hostname
+            const ipAddress = proxConfig.host.replace('https://', '').replace(':8006', '')
+            const consoleUrl = `https://${ipAddress}:8006/?console=lxc&xtermjs=1&vmid=${containerId}&vmname=${encodeURIComponent(name)}&node=${ipAddress}&cmd=`
+            
+            console.log(`Opening Engine console (fallback): ${consoleUrl}`)
+            window.open(consoleUrl, '_blank')
+            
+            toast({
+              title: "Console Opened! 🖥️",
+              description: `Engine console opened for container ${containerId} in a new tab (using IP fallback).`,
+              className: "bg-cyan-600/20 backdrop-blur-sm text-white border-yellow-500/30",
+            })
+          }
+          
+        } else {
+          toast({
+            title: "Container Not Found",
+            description: `Could not find LXC container for server "${name}"`,
+            className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Failed to open shell:', error)
+      toast({
+        title: "Error",
+        description: "Failed to open shell",
+        className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
+      })
+    }
   }
 
   const handleProxmoxSubmit = async (data: {
@@ -57,43 +570,99 @@ export default function ManageServersPage() {
     password?: string
   }) => {
     setIsLoadingAddEdit(true)
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    
+    try {
+      // Extract host and port from URL
+      const urlParts = data.url.replace(/https?:\/\//, '').split(':')
+      const host = urlParts[0]
+      const port = urlParts[1] || '8006'
 
-    if (data.id) {
-      // Editing existing server
-      setServers((prev) =>
-        prev.map((server) =>
-          server.id === data.id
-            ? { ...server, name: data.name, url: data.url, username: data.username, details: data.url }
-            : server,
-        ),
-      )
-      toast({
-        title: "Proxmox Server Updated! 🔄",
-        description: `Proxmox server "${data.name}" has been updated.`,
-        className: "bg-blue-600/20 backdrop-blur-sm text-white border-blue-500/30",
-      })
-    } else {
-      // Adding new server
-      const newProxmoxServer: ServerItem = {
-        id: `prox-${Date.now()}`,
-        name: data.name,
-        type: "Proxmox Server",
-        details: data.url,
-        url: data.url,
+      const proxData = {
+        server_name: data.name,
         username: data.username,
+        host: host,
+        port: port,
+        password: data.password || '',
       }
-      setServers((prev) => [...prev, newProxmoxServer])
+
+      if (data.id) {
+        // Editing existing server
+        const configId = data.id.replace('prox-', '')
+        const response = await axios.put(`http://localhost:7790/prox/${configId}`, proxData, {
+          withCredentials: true,
+        })
+
+        const updatedConfig: ProxConfig = response.data
+        const updatedServer: ServerItem = {
+          id: data.id,
+          name: updatedConfig.server_name || data.name,
+          type: "Proxmox Server",
+          details: `${updatedConfig.host}:${updatedConfig.port}`,
+          url: data.url,
+          username: updatedConfig.username,
+        }
+
+        setServers((prev) =>
+          prev.map((server) =>
+            server.id === data.id ? updatedServer : server
+          )
+        )
+        
+        toast({
+          title: "Engine Server Updated! 🔄",
+          description: `Engine server "${data.name}" has been updated.`,
+          className: "bg-blue-600/20 backdrop-blur-sm text-white border-blue-500/30",
+        })
+      } else {
+        // Check if server with same host already exists
+        const existingProxServers = servers.filter(s => s.type === "Proxmox Server")
+        const isDuplicate = existingProxServers.some(server => 
+          server.details?.includes(host)
+        )
+
+        if (isDuplicate) {
+          toast({
+            title: "Server Already Exists",
+            description: `A Engine server with IP ${host} is already configured.`,
+            className: "bg-yellow-600/20 backdrop-blur-sm text-white border-yellow-500/30",
+          })
+          return
+        }
+
+        // Adding new server
+        const response = await axios.post('http://localhost:7790/prox', proxData, {
+          withCredentials: true,
+        })
+
+        const newConfig: ProxConfig = response.data
+        const newProxmoxServer: ServerItem = {
+          id: `prox-${newConfig.ID}`,
+          name: newConfig.server_name || data.name,
+          type: "Proxmox Server",
+          details: `${newConfig.host}:${newConfig.port}`,
+          url: data.url,
+          username: newConfig.username,
+        }
+        
+        setServers((prev) => [...prev, newProxmoxServer])
+        toast({
+          title: "Engine Server Added! 🚀",
+          description: `Engine server "${newProxmoxServer.name}" has been added.`,
+          className: "bg-blue-600/20 backdrop-blur-sm text-white border-blue-500/30",
+        })
+      }
+    } catch (error) {
+      console.error('Failed to save prox  mox server:', error)
       toast({
-        title: "Proxmox Server Added! 🚀",
-        description: `Proxmox server "${newProxmoxServer.name}" has been added.`,
-        className: "bg-blue-600/20 backdrop-blur-sm text-white border-blue-500/30",
+        title: "Error",
+        description: "Failed to save Proxmox server configuration",
+        className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
       })
+    } finally {
+      setIsLoadingAddEdit(false)
+      setIsProxmoxModalOpen(false)
+      setEditingProxmoxServer(null)
     }
-    setIsLoadingAddEdit(false)
-    setIsProxmoxModalOpen(false)
-    setEditingProxmoxServer(null)
   }
 
   const openAddProxmoxModal = () => {
@@ -156,23 +725,34 @@ export default function ManageServersPage() {
           </div>
 
           <div className="grid lg:grid-cols-2 gap-8">
-            {/* Existing Servers */}
+            {/* Nucleus Servers */}
             <Card className="bg-white/10 backdrop-blur-sm border-white/20">
               <CardHeader>
                 <CardTitle className="text-white flex items-center gap-2">
-                  <HardDrive className="w-5 h-5" />
-                  Existing Servers
+                  <Server className="w-5 h-5" />
+                  Nucleus Servers
                 </CardTitle>
                 <CardDescription className="text-slate-300">
-                  Your currently managed Nucleus and Proxmox servers
+                  Your test and development servers
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {servers.length === 0 ? (
-                  <p className="text-slate-400 text-center py-4">No servers found. Add one below!</p>
+                {servers.filter(s => s.type === "Nucleus Server").length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-slate-400 mb-4">No Nucleus servers yet</p>
+                    <Link href="/create-server">
+                      <Button
+                        variant="outline"
+                        className="border-blue-500/30 text-blue-300 hover:bg-blue-500/10 bg-transparent"
+                      >
+                        <Server className="w-4 h-4 mr-2" />
+                        Create Your First Server
+                      </Button>
+                    </Link>
+                  </div>
                 ) : (
                   <div className="space-y-3">
-                    {servers.map((server) => (
+                    {servers.filter(s => s.type === "Nucleus Server").map((server) => (
                       <div
                         key={server.id}
                         className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/10"
@@ -184,17 +764,123 @@ export default function ManageServersPage() {
                           </p>
                         </div>
                         <div className="flex gap-2">
-                          {server.type === "Proxmox Server" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openEditProxmoxModal(server)}
-                              className="border-blue-500/30 text-blue-300 hover:bg-blue-500/10 bg-transparent"
-                            >
-                              <Edit className="w-4 h-4" />
-                              <span className="sr-only">Edit {server.name}</span>
-                            </Button>
-                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleOpenShell(server.id, server.name)}
+                            className="border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10 bg-transparent"
+                            title="Open Shell"
+                          >
+                            <Eye className="w-4 h-4" />
+                            <span className="sr-only">Open Shell for {server.name}</span>
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleStartServer(server.id, server.name)}
+                            disabled={isLoadingStart === server.id}
+                            className="border-green-500/30 text-green-300 hover:bg-green-500/10 bg-transparent"
+                          >
+                            {isLoadingStart === server.id ? (
+                              <Zap className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Play className="w-4 h-4" />
+                            )}
+                            <span className="sr-only">Start {server.name}</span>
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleShutdownServer(server.id, server.name)}
+                            disabled={isLoadingShutdown === server.id}
+                            className="border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10 bg-transparent"
+                          >
+                            {isLoadingShutdown === server.id ? (
+                              <Zap className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Power className="w-4 h-4" />
+                            )}
+                            <span className="sr-only">Shutdown {server.name}</span>
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDeleteServer(server.id, server.name)}
+                            disabled={isLoadingDelete === server.id}
+                            className="border-red-500/30 text-red-300 hover:bg-red-500/10 bg-transparent"
+                          >
+                            {isLoadingDelete === server.id ? (
+                              <Zap className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                            <span className="sr-only">Delete {server.name}</span>
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="pt-4 border-t border-white/10">
+                      <Link href="/create-server" className="w-full">
+                        <Button
+                          variant="outline"
+                          className="border-blue-500/30 text-blue-300 hover:bg-blue-500/10 bg-transparent w-full"
+                        >
+                          <PlusCircle className="w-4 h-4 mr-2" />
+                          Create Another Server
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Proxmox Servers */}
+            <Card className="bg-white/10 backdrop-blur-sm border-white/20">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <HardDrive className="w-5 h-5" />
+                  Engine Servers
+                </CardTitle>
+                <CardDescription className="text-slate-300">
+                  Your Engine server connections
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {servers.filter(s => s.type === "Proxmox Server").length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-slate-400 mb-4">No Proxmox servers connected</p>
+                    <Button
+                      onClick={openAddProxmoxModal}
+                      className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white"
+                    >
+                      <PlusCircle className="w-4 h-4 mr-2" />
+                      Connect Proxmox Server
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {servers.filter(s => s.type === "Proxmox Server").map((server) => (
+                      <div
+                        key={server.id}
+                        className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/10"
+                      >
+                        <div>
+                          <p className="text-white font-medium">{server.name}</p>
+                          <p className="text-xs text-slate-400">
+                            {server.type} {server.details && `(${server.details})`}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditProxmoxModal(server)}
+                            className="border-blue-500/30 text-blue-300 hover:bg-blue-500/10 bg-transparent"
+                          >
+                            <Edit className="w-4 h-4" />
+                            <span className="sr-only">Edit {server.name}</span>
+                          </Button>
                           <Button
                             variant="destructive"
                             size="sm"
@@ -212,38 +898,19 @@ export default function ManageServersPage() {
                         </div>
                       </div>
                     ))}
+                    <div className="pt-4 border-t border-white/10">
+                      <Button
+                        onClick={openAddProxmoxModal}
+                        disabled={servers.filter(s => s.type === "Proxmox Server").length >= 1}
+                        className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <PlusCircle className="w-4 h-4 mr-2" />
+                        {servers.filter(s => s.type === "Proxmox Server").length >= 1 ? "One Server Limit" : "Add Another Server"}
+                      </Button>
+                    </div>
                   </div>
                 )}
               </CardContent>
-            </Card>
-
-            {/* Add Server Button */}
-            <Card className="bg-white/10 backdrop-blur-sm border-white/20 flex flex-col items-center justify-center p-6">
-              <CardTitle className="text-white flex items-center gap-2 mb-4">
-                <PlusCircle className="w-6 h-6" />
-                Add New Server
-              </CardTitle>
-              <CardDescription className="text-slate-300 text-center mb-6">
-                Connect a new Proxmox server or create a new Nucleus test server.
-              </CardDescription>
-              <div className="flex flex-col gap-4 w-full max-w-xs">
-                <Button
-                  onClick={openAddProxmoxModal}
-                  className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white w-full"
-                >
-                  <PlusCircle className="w-4 h-4 mr-2" />
-                  Add Proxmox Server
-                </Button>
-                <Link href="/create-server" className="w-full">
-                  <Button
-                    variant="outline"
-                    className="border-blue-500/30 text-blue-300 hover:bg-blue-500/10 bg-transparent w-full"
-                  >
-                    <Server className="w-4 h-4 mr-2" />
-                    Create Nucleus Server
-                  </Button>
-                </Link>
-              </div>
             </Card>
           </div>
         </div>
@@ -260,3 +927,10 @@ export default function ManageServersPage() {
   )
 }
 
+export default function ManageServersPage() {
+  return (
+    <AuthGuard>
+      <ManageServersPageContent />
+    </AuthGuard>
+  )
+}

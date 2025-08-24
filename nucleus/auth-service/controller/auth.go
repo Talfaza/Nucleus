@@ -67,6 +67,10 @@ func Login(c fiber.Ctx) error {
 		Value:    t,
 		Expires:  time.Now().Add(time.Hour * 24),
 		HTTPOnly: true,
+		Secure:   false, // Set to true in production with HTTPS
+		SameSite: "Lax",
+		Domain:   "",
+		Path:     "/",
 	})
 
 	return c.JSON(fiber.Map{"message": "Login successful"})
@@ -91,4 +95,43 @@ func Logout(c fiber.Ctx) error {
 		HTTPOnly: true,
 	})
 	return c.JSON(fiber.Map{"message": "Logged out"})
+}
+
+func Verify(c fiber.Ctx) error {
+	cookie := c.Cookies("jwt")
+	
+	// Debug: log cookie presence
+	if cookie == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "No JWT cookie found"})
+	}
+
+	token, err := jwt.Parse(cookie, func(token *jwt.Token) (interface{}, error) {
+		return []byte(os.Getenv("JWT_SECRET")), nil
+	})
+
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token", "details": err.Error()})
+	}
+	
+	if !token.Valid {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Token not valid"})
+	}
+
+	claims := token.Claims.(jwt.MapClaims)
+	userID := claims["sub"]
+
+	var user models.User
+	database.DB.Where("id = ?", userID).First(&user)
+
+	if user.ID == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	return c.JSON(fiber.Map{
+		"user": fiber.Map{
+			"id":       user.ID,
+			"username": user.Username,
+			"email":    user.Email,
+		},
+	})
 }

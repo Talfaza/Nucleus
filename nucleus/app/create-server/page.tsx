@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useState } from "react"
+import axios from "axios"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -11,15 +12,31 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Server, ArrowLeft, Zap, Settings, Clock, Monitor, Package, Network } from "lucide-react"
+import { Server, ArrowLeft, Zap, Settings, Clock, Monitor, Package } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
+import { AuthGuard } from "@/components/auth-guard"
 
-export default function CreateServerPage() {
+function CreateServerPageContent() {
   const [selectedPackages, setSelectedPackages] = useState<string[]>([])
   const [packageVersions, setPackageVersions] = useState<Record<string, string>>({})
   const [isLoading, setIsLoading] = useState(false)
+  const [serverName, setServerName] = useState("")
+  const [operatingSystem, setOperatingSystem] = useState("")
+  const [cpuCores, setCpuCores] = useState("")
+  const [memory, setMemory] = useState("")
+  const [duration, setDuration] = useState("")
+  const [rootDiskSize, setRootDiskSize] = useState("")
+
   const { toast } = useToast()
+
+  // Available LXC templates for different distributions
+  const availableTemplates = {
+    ubuntu: {
+      name: "Ubuntu",
+      template: "local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst"
+    },
+  }
 
   const packages = [
     // Core Development Tools
@@ -286,15 +303,200 @@ export default function CreateServerPage() {
     e.preventDefault()
     setIsLoading(true)
 
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false)
+    try {
+      // Validate required fields
+      if (!operatingSystem) {
+        toast({
+          title: "Missing Operating System",
+          description: "Please select an operating system distribution",
+          className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
+        })
+        setIsLoading(false)
+        return
+      }
+
+
+
+      if (!cpuCores || !memory || !rootDiskSize) {
+        toast({
+          title: "Missing Server Specifications",
+          description: "Please fill in CPU cores, memory, and root disk size",
+          className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
+        })
+        setIsLoading(false)
+        return
+      }
+
+      // First save the server configuration to lxc-service
+      const payload = {
+        name: serverName || "my-test-server",
+        packages: packageVersions,
+      }
+
+      await axios.post(
+        "http://localhost:7402/lxc",
+        payload,
+        { withCredentials: true, validateStatus: (s) => s >= 200 && s < 300 },
+      )
+
+      // Get Proxmox server details to create LXC
+      try {
+        const proxRes = await axios.get('http://localhost:7790/prox', { withCredentials: true })
+        const prox = Array.isArray(proxRes.data) && proxRes.data.length > 0 ? proxRes.data[0] : null
+        
+        if (prox) {
+          // Generate unique CTID (container ID)
+          const ctid = Math.floor(Math.random() * 900) + 100 // Random ID between 100-999
+          
+          // Get the selected template based on OS
+          const selectedTemplate = availableTemplates[operatingSystem as keyof typeof availableTemplates]?.template
+          
+          if (!selectedTemplate) {
+            throw new Error(`Template not found for ${operatingSystem}`)
+          }
+          
+          // Use form values for memory, cores, and other settings
+          const memoryValue = parseInt(memory)
+          const coresValue = parseInt(cpuCores)
+          const diskSizeValue = parseInt(rootDiskSize)
+          
+          // Create the pct command based on the script with dynamic values
+          // Use default bridge configuration
+          const networkConfig = "name=eth0,bridge=vmbr0,type=veth"
+          
+          // Create and start the container
+          // Use the actual server name as hostname for easier identification
+          const serverHostname = serverName || `server-${ctid}`
+          const createCommand = `pct create ${ctid} ${selectedTemplate} -memory ${memoryValue} -cores ${coresValue} -hostname "${serverHostname}" -rootfs local-lvm:${diskSizeValue} -password "root123" -unprivileged 1 -net0 ${networkConfig} && pct start ${ctid}`
+          
+          // Log the create command for debugging
+          console.log('Create Command:', createCommand)
+          
+          // Execute the create command via ssh-service
+          const createResponse = await axios.post('http://localhost:7789/execute', {
+            host: prox.host.replace('https://', '').replace(':8006', ''), // Extract IP from URL
+            port: "22", // SSH port
+            username: prox.username,
+            password: prox.password, // Note: This should be handled securely in production
+            command: createCommand,
+          }, { withCredentials: false })
+          
+          // Wait a moment for the container to fully start
+          await new Promise(resolve => setTimeout(resolve, 5000))
+          
+          // Install selected packages if any
+          if (Object.keys(packageVersions).length > 0) {
+            const packagesToInstall = Object.entries(packageVersions).map(([pkgName, version]) => {
+              if (version === 'latest') {
+                return pkgName
+              } else {
+                // For specific versions, we'll need to handle different package managers
+                return `${pkgName}=${version}`
+              }
+            }).join(' ')
+            
+            const installCommand = `pct exec ${ctid} -- apt update && pct exec ${ctid} -- apt install -y ${packagesToInstall}`
+            
+            console.log('Install Command:', installCommand)
+            
+            // Execute the install command
+            const installResponse = await axios.post('http://localhost:7789/execute', {
+              host: prox.host.replace('https://', '').replace(':8006', ''), // Extract IP from URL
+              port: "22", // SSH port
+              username: prox.username,
+              password: prox.password,
+              command: installCommand,
+            }, { withCredentials: false })
+            
+            console.log('Package installation completed')
+          }
+          
+          const selectedDistro = availableTemplates[operatingSystem as keyof typeof availableTemplates]?.name
+          
+          // Play success sound
+          try {
+            console.log('Playing success sound...')
+            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+            const oscillator = audioContext.createOscillator()
+            const gainNode = audioContext.createGain()
+            
+            oscillator.connect(gainNode)
+            gainNode.connect(audioContext.destination)
+            
+            // Make it much louder and longer
+            oscillator.frequency.setValueAtTime(800, audioContext.currentTime)
+            oscillator.frequency.setValueAtTime(1000, audioContext.currentTime + 0.2)
+            oscillator.frequency.setValueAtTime(1200, audioContext.currentTime + 0.4)
+            oscillator.frequency.setValueAtTime(1400, audioContext.currentTime + 0.6)
+            
+            // Much higher volume - start at 80% and fade slowly
+            gainNode.gain.setValueAtTime(0.8, audioContext.currentTime)
+            gainNode.gain.exponentialRampToValueAtTime(0.1, audioContext.currentTime + 0.8)
+            
+            oscillator.start(audioContext.currentTime)
+            oscillator.stop(audioContext.currentTime + 0.8)
+            
+            console.log('Sound started successfully')
+          } catch (error) {
+            console.log('Could not play sound:', error)
+            
+            // Fallback: try to play a simple beep
+            try {
+              const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+              const oscillator = audioContext.createOscillator()
+              const gainNode = audioContext.createGain()
+              
+              oscillator.connect(gainNode)
+              gainNode.connect(audioContext.destination)
+              
+              oscillator.frequency.setValueAtTime(1000, audioContext.currentTime)
+              gainNode.gain.setValueAtTime(1.0, audioContext.currentTime) // Maximum volume
+              
+              oscillator.start(audioContext.currentTime)
+              oscillator.stop(audioContext.currentTime + 0.5)
+              
+              console.log('Fallback sound played')
+            } catch (fallbackError) {
+              console.log('Fallback sound also failed:', fallbackError)
+            }
+          }
+          
+          toast({
+            title: "LXC Container Created! 🐳",
+            description: `${selectedDistro} container ${ctid} created successfully with packages installed on Proxmox server`,
+            className: "bg-green-600/20 backdrop-blur-sm text-white border-green-500/30",
+          })
+        } else {
+          toast({
+            title: "No Proxmox Server Found",
+            description: "Please configure a Proxmox server first in the Manage page",
+            className: "bg-yellow-600/20 backdrop-blur-sm text-white border-yellow-500/30",
+          })
+        }
+      } catch (sshError) {
+        console.error('SSH/LXC creation error:', sshError)
+        toast({
+          title: "LXC Creation Failed",
+          description: "Failed to create LXC container on Proxmox server",
+          className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
+        })
+      }
+
       toast({
-        title: "Server Created! 🚀",
-        description: "Your test server is being deployed. You'll receive a notification when it's ready.",
+        title: "Server Saved! 🚀",
+        description: "Your server configuration was saved.",
         className: "bg-blue-600/20 backdrop-blur-sm text-white border-blue-500/30",
       })
-    }, 2000)
+    } catch (err) {
+      console.error('Error saving server:', err)
+      toast({
+        title: "Error",
+        description: "Failed to save server configuration",
+        className: "bg-red-600/20 backdrop-blur-sm text-white border-red-500/30",
+      })
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -324,13 +526,22 @@ export default function CreateServerPage() {
           </div>
           <span className="text-xl font-bold">Nucleus</span>
         </Link>
-        <Link
-          href="/"
-          className="ml-auto flex items-center gap-2 text-sm font-medium hover:text-blue-400 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Home
-        </Link>
+        <div className="ml-auto flex items-center gap-4">
+          <Link
+            href="/manage"
+            className="flex items-center gap-2 text-sm font-medium hover:text-blue-400 transition-colors"
+          >
+            <Server className="w-4 h-4" />
+            Manage Servers
+          </Link>
+          <Link
+            href="/"
+            className="flex items-center gap-2 text-sm font-medium hover:text-blue-400 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Home
+          </Link>
+        </div>
       </header>
 
       {/* Create Server Form */}
@@ -354,9 +565,6 @@ export default function CreateServerPage() {
                   <Server className="w-5 h-5" />
                   Basic Configuration
                 </CardTitle>
-                <CardDescription className="text-slate-300">
-                  Set up the fundamental settings for your test server
-                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
@@ -367,19 +575,12 @@ export default function CreateServerPage() {
                     id="server-name"
                     placeholder="my-test-server"
                     className="bg-white/10 border-white/20 text-white placeholder:text-slate-400 focus:border-blue-500"
+                    value={serverName}
+                    onChange={(e) => setServerName(e.target.value)}
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="description" className="text-white">
-                    Description
-                  </Label>
-                  <Textarea
-                    id="description"
-                    placeholder="Brief description of your test server..."
-                    className="bg-white/10 border-white/20 text-white placeholder:text-slate-400 focus:border-blue-500 min-h-[100px]"
-                  />
-                </div>
+          
               </CardContent>
             </Card>
 
@@ -391,24 +592,25 @@ export default function CreateServerPage() {
                   Operating System
                 </CardTitle>
                 <CardDescription className="text-slate-300">
-                  Choose the operating system and version for your server
+                  Choose the distribution for your server
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="os" className="text-white">
-                      Operating System
+                      Distribution
                     </Label>
-                    <Select>
+                    <Select value={operatingSystem} onValueChange={setOperatingSystem}>
                       <SelectTrigger className="bg-white/10 border-white/20 text-white focus:border-blue-500">
-                        <SelectValue placeholder="Select OS" />
+                        <SelectValue placeholder="Select Distribution" />
                       </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700 z-50">
-                        <SelectItem value="ubuntu">Ubuntu</SelectItem>
-                        <SelectItem value="debian">Debian</SelectItem>
-                        <SelectItem value="centos">CentOS</SelectItem>
-                        <SelectItem value="alpine">Alpine Linux</SelectItem>
+                      <SelectContent className="bg-slate-800 border-slate-700 text-white z-50">
+                        {Object.entries(availableTemplates).map(([key, distro]) => (
+                          <SelectItem key={key} value={key} className="text-white hover:bg-slate-700 focus:bg-slate-700">
+                            {distro.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -416,51 +618,7 @@ export default function CreateServerPage() {
               </CardContent>
             </Card>
 
-            {/* Network Configuration */}
-            <Card className="bg-white/10 backdrop-blur-sm border-white/20">
-              <CardHeader>
-                <CardTitle className="text-white flex items-center gap-2">
-                  <Network className="w-5 h-5" />
-                  Network Configuration
-                </CardTitle>
-                <CardDescription className="text-slate-300">
-                  Configure network settings and isolation for your server
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-4">
-                  <Label className="text-white text-base font-medium">Network Isolation</Label>
-                  <RadioGroup defaultValue="not-isolated" className="space-y-3">
-                    <div className="flex items-start space-x-3 p-4 rounded-lg bg-white/5 border border-white/10">
-                      <RadioGroupItem
-                        value="not-isolated"
-                        id="not-isolated"
-                        className="mt-1 border-white/30 text-blue-600"
-                      />
-                      <div className="flex-1">
-                        <Label htmlFor="not-isolated" className="text-white font-medium cursor-pointer">
-                          Not Isolated
-                        </Label>
-                        <p className="text-sm text-slate-400 mt-1">
-                          Server can access external networks and internet resources
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-start space-x-3 p-4 rounded-lg bg-white/5 border border-white/10">
-                      <RadioGroupItem value="isolated" id="isolated" className="mt-1 border-white/30 text-blue-600" />
-                      <div className="flex-1">
-                        <Label htmlFor="isolated" className="text-white font-medium cursor-pointer">
-                          Isolated
-                        </Label>
-                        <p className="text-sm text-slate-400 mt-1">
-                          Server is completely isolated from external networks for security testing
-                        </p>
-                      </div>
-                    </div>
-                  </RadioGroup>
-                </div>
-              </CardContent>
-            </Card>
+
 
             {/* Server Specifications */}
             <Card className="bg-white/10 backdrop-blur-sm border-white/20">
@@ -472,18 +630,20 @@ export default function CreateServerPage() {
                 <CardDescription className="text-slate-300">Configure the hardware specifications</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid md:grid-cols-2 gap-4">
+                <div className="grid md:grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="cpu" className="text-white">
                       CPU Cores
                     </Label>
-                    <Select>
+                    <Select value={cpuCores} onValueChange={setCpuCores}>
                       <SelectTrigger className="bg-white/10 border-white/20 text-white focus:border-blue-500">
                         <SelectValue placeholder="Select CPU" />
                       </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700 z-50">
-                        <SelectItem value="1">1 Core</SelectItem>
-                        <SelectItem value="2">2 Cores</SelectItem>
+                      <SelectContent className="bg-slate-800 border-slate-700 text-white z-50">
+                        <SelectItem value="1" className="text-white hover:bg-slate-700 focus:bg-slate-700">1 Core</SelectItem>
+                        <SelectItem value="2" className="text-white hover:bg-slate-700 focus:bg-slate-700">2 Cores</SelectItem>
+                        <SelectItem value="4" className="text-white hover:bg-slate-700 focus:bg-slate-700">4 Cores</SelectItem>
+                        <SelectItem value="8" className="text-white hover:bg-slate-700 focus:bg-slate-700">8 Cores</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -491,22 +651,42 @@ export default function CreateServerPage() {
                     <Label htmlFor="memory" className="text-white">
                       Memory (RAM)
                     </Label>
-                    <Select>
+                    <Select value={memory} onValueChange={setMemory}>
                       <SelectTrigger className="bg-white/10 border-white/20 text-white focus:border-blue-500">
                         <SelectValue placeholder="Select RAM" />
                       </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700 z-50">
-                        <SelectItem value="512">512 MB</SelectItem>
-                        <SelectItem value="1024">1 GB</SelectItem>
-                        <SelectItem value="2048">2 GB</SelectItem>
-                        <SelectItem value="4096">4 GB</SelectItem>
-                        <SelectItem value="8192">8 GB</SelectItem>
+                      <SelectContent className="bg-slate-800 border-slate-700 text-white z-50">
+                        <SelectItem value="512" className="text-white hover:bg-slate-700 focus:bg-slate-700">512 MB</SelectItem>
+                        <SelectItem value="1024" className="text-white hover:bg-slate-700 focus:bg-slate-700">1 GB</SelectItem>
+                        <SelectItem value="2048" className="text-white hover:bg-slate-700 focus:bg-slate-700">2 GB</SelectItem>
+                        <SelectItem value="4096" className="text-white hover:bg-slate-700 focus:bg-slate-700">4 GB</SelectItem>
+                        <SelectItem value="8192" className="text-white hover:bg-slate-700 focus:bg-slate-700">8 GB</SelectItem>
+                        <SelectItem value="16384" className="text-white hover:bg-slate-700 focus:bg-slate-700">16 GB</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="root-disk" className="text-white">
+                      Root Disk Size (GB)
+                    </Label>
+                    <Select value={rootDiskSize} onValueChange={setRootDiskSize}>
+                      <SelectTrigger className="bg-white/10 border-white/20 text-white focus:border-blue-500">
+                        <SelectValue placeholder="Select Disk Size" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-slate-800 border-slate-700 text-white z-50">
+                        <SelectItem value="4" className="text-white hover:bg-slate-700 focus:bg-slate-700">4 GB</SelectItem>
+                        <SelectItem value="8" className="text-white hover:bg-slate-700 focus:bg-slate-700">8 GB</SelectItem>
+                        <SelectItem value="16" className="text-white hover:bg-slate-700 focus:bg-slate-700">16 GB</SelectItem>
+                        <SelectItem value="32" className="text-white hover:bg-slate-700 focus:bg-slate-700">32 GB</SelectItem>
+                        <SelectItem value="64" className="text-white hover:bg-slate-700 focus:bg-slate-700">64 GB</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
               </CardContent>
             </Card>
+
+
 
             {/* Packages */}
             <Card className="bg-white/10 backdrop-blur-sm border-white/20">
@@ -554,9 +734,9 @@ export default function CreateServerPage() {
                                   <SelectTrigger className="bg-white/10 border-white/20 text-white focus:border-blue-500 h-8 text-xs w-full">
                                     <SelectValue />
                                   </SelectTrigger>
-                                  <SelectContent className="bg-slate-800 border-slate-700 z-50">
+                                  <SelectContent className="bg-slate-800 border-slate-700 text-white z-50">
                                     {pkg.versions.map((version) => (
-                                      <SelectItem key={version} value={version} className="text-xs">
+                                      <SelectItem key={version} value={version} className="text-xs text-white hover:bg-slate-700 focus:bg-slate-700">
                                         {version}
                                       </SelectItem>
                                     ))}
@@ -580,7 +760,7 @@ export default function CreateServerPage() {
                   <Clock className="w-5 h-5" />
                   Server Lifetime
                 </CardTitle>
-                <CardDescription className="text-slate-300">Configure how long the server should run</CardDescription>
+
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid md:grid-cols-2 gap-4">
@@ -588,35 +768,18 @@ export default function CreateServerPage() {
                     <Label htmlFor="duration" className="text-white">
                       Duration
                     </Label>
-                    <Select>
+                    <Select value={duration} onValueChange={setDuration}>
                       <SelectTrigger className="bg-white/10 border-white/20 text-white focus:border-blue-500">
                         <SelectValue placeholder="Select duration" />
                       </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700 z-50">
-                        <SelectItem value="1h">1 Hour</SelectItem>
-                        <SelectItem value="6h">6 Hours</SelectItem>
-                        <SelectItem value="12h">12 Hours</SelectItem>
-                        <SelectItem value="24h">24 Hours</SelectItem>
-                        <SelectItem value="7d">7 Days</SelectItem>
-                        <SelectItem value="30d">30 Days</SelectItem>
-                        <SelectItem value="permanent">Permanent</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="auto-destroy" className="text-white">
-                      Auto-destroy on inactivity
-                    </Label>
-                    <Select>
-                      <SelectTrigger className="bg-white/10 border-white/20 text-white focus:border-blue-500">
-                        <SelectValue placeholder="Select timeout" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700 z-50">
-                        <SelectItem value="disabled">Disabled</SelectItem>
-                        <SelectItem value="30m">30 Minutes</SelectItem>
-                        <SelectItem value="1h">1 Hour</SelectItem>
-                        <SelectItem value="6h">6 Hours</SelectItem>
-                        <SelectItem value="24h">24 Hours</SelectItem>
+                      <SelectContent className="bg-slate-800 border-slate-700 text-white z-50">
+                        <SelectItem value="1h" className="text-white hover:bg-slate-700 focus:bg-slate-700">1 Hour</SelectItem>
+                        <SelectItem value="6h" className="text-white hover:bg-slate-700 focus:bg-slate-700">6 Hours</SelectItem>
+                        <SelectItem value="12h" className="text-white hover:bg-slate-700 focus:bg-slate-700">12 Hours</SelectItem>
+                        <SelectItem value="24h" className="text-white hover:bg-slate-700 focus:bg-slate-700">24 Hours</SelectItem>
+                        <SelectItem value="7d" className="text-white hover:bg-slate-700 focus:bg-slate-700">7 Days</SelectItem>
+                        <SelectItem value="30d" className="text-white hover:bg-slate-700 focus:bg-slate-700">30 Days</SelectItem>
+                        <SelectItem value="permanent" className="text-white hover:bg-slate-700 focus:bg-slate-700">Permanent</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -649,5 +812,13 @@ export default function CreateServerPage() {
         </div>
       </section>
     </div>
+  )
+}
+
+export default function CreateServerPage() {
+  return (
+    <AuthGuard>
+      <CreateServerPageContent />
+    </AuthGuard>
   )
 }

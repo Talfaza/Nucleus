@@ -32,8 +32,9 @@ func Connect() {
 	fmt.Println("Database connected :3")
 
 	DB = database
-	if err := DB.AutoMigrate(&models.SSHConfig{}); err != nil {
+	if err := DB.AutoMigrate(&models.ProxConfig{}); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
 
 }
+

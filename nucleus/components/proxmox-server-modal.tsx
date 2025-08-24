@@ -1,34 +1,35 @@
-"use client"
+"use client";
 
-import type React from "react"
-import { useState, useEffect } from "react"
-import { Button } from "@/components/ui/button"
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { PlusCircle, Zap } from "lucide-react"
-
-interface ProxmoxServerData {
-  id?: string // Optional for new servers
-  name: string
-  url: string
-  username: string
-  password?: string // Password might not be returned from API for security, only sent on creation/update
-}
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Zap, Server } from "lucide-react";
 
 interface ProxmoxServerModalProps {
-  isOpen: boolean
-  onOpenChange: (open: boolean) => void
-  initialData?: ProxmoxServerData | null
-  onSubmit: (data: ProxmoxServerData) => Promise<void>
-  isLoading: boolean
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialData?: {
+    id?: string;
+    name: string;
+    url?: string;
+    username?: string;
+  } | null;
+  onSubmit: (data: {
+    id?: string;
+    name: string;
+    url: string;
+    username: string;
+    password?: string;
+  }) => Promise<void>;
+  isLoading: boolean;
 }
 
 export function ProxmoxServerModal({
@@ -38,111 +39,128 @@ export function ProxmoxServerModal({
   onSubmit,
   isLoading,
 }: ProxmoxServerModalProps) {
-  const [name, setName] = useState("")
-  const [url, setUrl] = useState("")
-  const [username, setUsername] = useState("")
-  const [password, setPassword] = useState("") // Only for new/updated password
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
     if (initialData) {
-      setName(initialData.name)
-      setUrl(initialData.url)
-      setUsername(initialData.username)
-      setPassword("") // Clear password when editing, user will re-enter if needed
+      setName(initialData.name || "");
+      // Extract IP from URL for editing
+      const extractedUrl = initialData.url 
+        ? initialData.url.replace(/https?:\/\//, '').replace(':8006', '').replace(/\/.*$/, '')
+        : "";
+      setUrl(extractedUrl);
+      setUsername(initialData.username || "");
+      setPassword("");
     } else {
-      setName("")
-      setUrl("")
-      setUsername("")
-      setPassword("")
+      setName("");
+      setUrl("");
+      setUsername("");
+      setPassword("");
     }
-  }, [initialData, isOpen]) // Reset when modal opens or initialData changes
+  }, [initialData, isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const data: ProxmoxServerData = {
+    e.preventDefault();
+    
+    // Convert IP to full URL format
+    const fullUrl = url.startsWith('http') ? url : `https://${url}:8006`;
+    
+    await onSubmit({
+      id: initialData?.id,
       name,
-      url,
+      url: fullUrl,
       username,
-    }
-    if (password) {
-      data.password = password
-    }
-    if (initialData?.id) {
-      data.id = initialData.id // Include ID for updates
-    }
-    await onSubmit(data)
-    if (!isLoading) {
-      // Only close if submission was successful and not still loading
-      onOpenChange(false)
-    }
-  }
+      password: password || undefined,
+    });
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px] bg-slate-900 text-white border-slate-700">
+      <DialogContent className="bg-slate-800 border-slate-700 text-white">
         <DialogHeader>
-          <DialogTitle className="text-white">{initialData ? "Edit Proxmox Server" : "Add Proxmox Server"}</DialogTitle>
-          <DialogDescription className="text-slate-400">
+          <DialogTitle className="flex items-center gap-2">
+            <Server className="w-5 h-5" />
+            {initialData ? "Edit Proxmox Server" : "Add Proxmox Server"}
+          </DialogTitle>
+          <DialogDescription className="text-slate-300">
             {initialData
-              ? "Make changes to your Proxmox server connection here."
-              : "Connect a new Proxmox server to Nucleus."}
+              ? "Update the Proxmox server connection details."
+              : "Configure a new Proxmox server connection."}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="grid gap-4 py-4">
+
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name" className="text-white">
               Server Name
             </Label>
             <Input
               id="name"
-              placeholder="My Proxmox Host"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              required
+              placeholder="e.g., Proxmox Host 01"
               className="bg-white/10 border-white/20 text-white placeholder:text-slate-400 focus:border-blue-500"
+              required
             />
           </div>
+
           <div className="space-y-2">
             <Label htmlFor="url" className="text-white">
-              API URL (e.g., https://192.168.1.100:8006)
+              Server IP
             </Label>
             <Input
               id="url"
-              type="url"
-              placeholder="https://your-proxmox-ip:8006"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              required
+              placeholder="192.168.1.100"
               className="bg-white/10 border-white/20 text-white placeholder:text-slate-400 focus:border-blue-500"
+              required
             />
+            <p className="text-xs text-slate-400">Enter the IP address of your Proxmox server</p>
           </div>
+
           <div className="space-y-2">
             <Label htmlFor="username" className="text-white">
               Username
             </Label>
             <Input
               id="username"
-              placeholder="root@pam"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              required
+              placeholder="root@pam"
               className="bg-white/10 border-white/20 text-white placeholder:text-slate-400 focus:border-blue-500"
+              required
             />
           </div>
+
           <div className="space-y-2">
             <Label htmlFor="password" className="text-white">
-              Password {initialData ? "(Leave blank to keep current)" : ""}
+              Password
             </Label>
             <Input
               id="password"
               type="password"
-              placeholder="Proxmox API Token or Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder={initialData ? "Leave empty to keep current password" : "Enter password"}
               className="bg-white/10 border-white/20 text-white placeholder:text-slate-400 focus:border-blue-500"
+              required={!initialData}
             />
           </div>
-          <DialogFooter>
+
+          <div className="flex justify-end gap-3 pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              className="border-gray-600 bg-gray-800 text-white hover:bg-gray-700"
+              disabled={isLoading}
+            >
+              Cancel
+            </Button>
             <Button
               type="submit"
               disabled={isLoading}
@@ -151,19 +169,18 @@ export function ProxmoxServerModal({
               {isLoading ? (
                 <>
                   <Zap className="w-4 h-4 mr-2 animate-spin" />
-                  Saving...
+                  {initialData ? "Updating..." : "Adding..."}
                 </>
               ) : (
                 <>
-                  <PlusCircle className="w-4 h-4 mr-2" />
-                  {initialData ? "Save Changes" : "Add Server"}
+                  <Server className="w-4 h-4 mr-2" />
+                  {initialData ? "Update Server" : "Add Server"}
                 </>
               )}
             </Button>
-          </DialogFooter>
+          </div>
         </form>
       </DialogContent>
     </Dialog>
-  )
+  );
 }
-

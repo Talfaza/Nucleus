@@ -11,5 +11,6 @@ func Setup(app *fiber.App) {
 	auth.Post("/register", controller.Register)
 	auth.Post("/login", controller.Login)
 	auth.Get("/logout", controller.Logout)
+	auth.Get("/verify", controller.Verify)
 	auth.Get("/mailcheck", controller.MailCheck)
 }

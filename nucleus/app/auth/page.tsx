@@ -43,7 +43,10 @@ export default function AuthPage() {
           email: loginEmail,
           password: loginPassword,
         },
-        { validateStatus: (status) => status >= 200 && status < 300 },
+        { 
+          withCredentials: true,
+          validateStatus: (status) => status >= 200 && status < 300 
+        },
       );
       router.push("/create-server");
     } catch (err: any) {
@@ -66,7 +69,10 @@ export default function AuthPage() {
           email: registerEmail,
           password: registerPassword,
         },
-        { validateStatus: (status) => status >= 200 && status < 300 },
+        { 
+          withCredentials: true,
+          validateStatus: (status) => status >= 200 && status < 300 
+        },
       );
       setActiveTab("login");
       setRegisterUsername("");

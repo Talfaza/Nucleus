@@ -946,9 +946,6 @@ video {
 .min-h-0 {
   min-height: 0px;
 }
-.min-h-\[100px\] {
-  min-height: 100px;
-}
 .min-h-\[80px\] {
   min-height: 80px;
 }
@@ -1077,6 +1074,9 @@ video {
 }
 .max-w-4xl {
   max-width: 56rem;
+}
+.max-w-6xl {
+  max-width: 72rem;
 }
 .max-w-\[--skeleton-width\] {
   max-width: var(--skeleton-width);
@@ -1231,6 +1231,9 @@ video {
 .items-stretch {
   align-items: stretch;
 }
+.justify-end {
+  justify-content: flex-end;
+}
 .justify-center {
   justify-content: center;
 }
@@ -1378,6 +1381,9 @@ video {
 .border-b {
   border-bottom-width: 1px;
 }
+.border-b-2 {
+  border-bottom-width: 2px;
+}
 .border-l {
   border-left-width: 1px;
 }
@@ -1393,11 +1399,18 @@ video {
 .border-\[--color-border\] {
   border-color: var(--color-border);
 }
+.border-blue-500 {
+  --tw-border-opacity: 1;
+  border-color: rgb(59 130 246 / var(--tw-border-opacity, 1));
+}
 .border-blue-500\/30 {
   border-color: rgb(59 130 246 / 0.3);
 }
 .border-border\/50 {
   border-color: hsl(var(--border) / 0.5);
+}
+.border-cyan-500\/30 {
+  border-color: rgb(6 182 212 / 0.3);
 }
 .border-destructive {
   border-color: hsl(var(--destructive));
@@ -1405,12 +1418,22 @@ video {
 .border-destructive\/50 {
   border-color: hsl(var(--destructive) / 0.5);
 }
+.border-gray-600 {
+  --tw-border-opacity: 1;
+  border-color: rgb(75 85 99 / var(--tw-border-opacity, 1));
+}
+.border-green-500\/30 {
+  border-color: rgb(34 197 94 / 0.3);
+}
 .border-input {
   border-color: hsl(var(--input));
 }
 .border-primary {
   --tw-border-opacity: 1;
   border-color: rgb(65 105 225 / var(--tw-border-opacity, 1));
+}
+.border-red-500\/30 {
+  border-color: rgb(239 68 68 / 0.3);
 }
 .border-slate-700 {
   --tw-border-opacity: 1;
@@ -1427,6 +1450,9 @@ video {
 }
 .border-white\/30 {
   border-color: rgb(255 255 255 / 0.3);
+}
+.border-yellow-500\/30 {
+  border-color: rgb(234 179 8 / 0.3);
 }
 .border-l-transparent {
   border-left-color: transparent;
@@ -1464,15 +1490,25 @@ video {
 .bg-cyan-500\/15 {
   background-color: rgb(6 182 212 / 0.15);
 }
+.bg-cyan-600\/20 {
+  background-color: rgb(8 145 178 / 0.2);
+}
 .bg-destructive {
   background-color: hsl(var(--destructive));
 }
 .bg-foreground {
   background-color: hsl(var(--foreground));
 }
+.bg-gray-800 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(31 41 55 / var(--tw-bg-opacity, 1));
+}
 .bg-green-500 {
   --tw-bg-opacity: 1;
   background-color: rgb(34 197 94 / var(--tw-bg-opacity, 1));
+}
+.bg-green-600\/20 {
+  background-color: rgb(22 163 74 / 0.2);
 }
 .bg-indigo-500\/20 {
   background-color: rgb(99 102 241 / 0.2);
@@ -1493,6 +1529,12 @@ video {
 .bg-purple-500\/20 {
   background-color: rgb(168 85 247 / 0.2);
 }
+.bg-red-600\/20 {
+  background-color: rgb(220 38 38 / 0.2);
+}
+.bg-red-600\/80 {
+  background-color: rgb(220 38 38 / 0.8);
+}
 .bg-secondary {
   background-color: hsl(var(--secondary));
 }
@@ -1508,6 +1550,9 @@ video {
 }
 .bg-white\/5 {
   background-color: rgb(255 255 255 / 0.05);
+}
+.bg-yellow-600\/20 {
+  background-color: rgb(202 138 4 / 0.2);
 }
 .bg-gradient-to-br {
   background-image: linear-gradient(to bottom right, var(--tw-gradient-stops));
@@ -1794,15 +1839,15 @@ video {
   --tw-text-opacity: 1;
   color: rgb(96 165 250 / var(--tw-text-opacity, 1));
 }
-.text-blue-600 {
-  --tw-text-opacity: 1;
-  color: rgb(37 99 235 / var(--tw-text-opacity, 1));
-}
 .text-card-foreground {
   color: hsl(var(--card-foreground));
 }
 .text-current {
   color: currentColor;
+}
+.text-cyan-300 {
+  --tw-text-opacity: 1;
+  color: rgb(103 232 249 / var(--tw-text-opacity, 1));
 }
 .text-destructive {
   color: hsl(var(--destructive));
@@ -1815,6 +1860,10 @@ video {
 }
 .text-foreground\/50 {
   color: hsl(var(--foreground) / 0.5);
+}
+.text-green-300 {
+  --tw-text-opacity: 1;
+  color: rgb(134 239 172 / var(--tw-text-opacity, 1));
 }
 .text-green-400 {
   --tw-text-opacity: 1;
@@ -1832,6 +1881,10 @@ video {
 }
 .text-primary-foreground {
   color: hsl(var(--primary-foreground));
+}
+.text-red-300 {
+  --tw-text-opacity: 1;
+  color: rgb(252 165 165 / var(--tw-text-opacity, 1));
 }
 .text-red-400 {
   --tw-text-opacity: 1;
@@ -1854,6 +1907,10 @@ video {
 .text-white {
   --tw-text-opacity: 1;
   color: rgb(255 255 255 / var(--tw-text-opacity, 1));
+}
+.text-yellow-300 {
+  --tw-text-opacity: 1;
+  color: rgb(253 224 71 / var(--tw-text-opacity, 1));
 }
 .underline-offset-4 {
   text-underline-offset: 4px;
@@ -2166,12 +2223,25 @@ body {
   background-color: rgb(59 130 246 / 0.1);
 }
 
+.hover\:bg-cyan-500\/10:hover {
+  background-color: rgb(6 182 212 / 0.1);
+}
+
 .hover\:bg-destructive\/80:hover {
   background-color: hsl(var(--destructive) / 0.8);
 }
 
 .hover\:bg-destructive\/90:hover {
   background-color: hsl(var(--destructive) / 0.9);
+}
+
+.hover\:bg-gray-700:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(55 65 81 / var(--tw-bg-opacity, 1));
+}
+
+.hover\:bg-green-500\/10:hover {
+  background-color: rgb(34 197 94 / 0.1);
 }
 
 .hover\:bg-muted:hover {
@@ -2195,6 +2265,14 @@ body {
   background-color: rgb(65 105 225 / 0.9);
 }
 
+.hover\:bg-red-500\/10:hover {
+  background-color: rgb(239 68 68 / 0.1);
+}
+
+.hover\:bg-red-700\/80:hover {
+  background-color: rgb(185 28 28 / 0.8);
+}
+
 .hover\:bg-secondary:hover {
   background-color: hsl(var(--secondary));
 }
@@ -2203,8 +2281,17 @@ body {
   background-color: hsl(var(--secondary) / 0.8);
 }
 
+.hover\:bg-slate-700:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(51 65 85 / var(--tw-bg-opacity, 1));
+}
+
 .hover\:bg-white\/10:hover {
   background-color: rgb(255 255 255 / 0.1);
+}
+
+.hover\:bg-yellow-500\/10:hover {
+  background-color: rgb(234 179 8 / 0.1);
 }
 
 .hover\:from-blue-700:hover {
@@ -2274,6 +2361,11 @@ body {
 .focus\:bg-primary:focus {
   --tw-bg-opacity: 1;
   background-color: rgb(65 105 225 / var(--tw-bg-opacity, 1));
+}
+
+.focus\:bg-slate-700:focus {
+  --tw-bg-opacity: 1;
+  background-color: rgb(51 65 85 / var(--tw-bg-opacity, 1));
 }
 
 .focus\:text-accent-foreground:focus {
@@ -3166,6 +3258,10 @@ body {
 
   .md\:grid-cols-2 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .md\:grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .md\:flex-row {
