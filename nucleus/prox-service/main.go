@@ -30,7 +30,7 @@ func main() {
 	protected.Put("/prox/:id", services.UpdateUserConfig)
 	protected.Delete("/prox/:id", services.DeleteUserConfig)
 
-	log.Println("Server running on port 7790")
+	log.Println("Server running on port 7790 !")
 	log.Fatal(app.Listen(":7790"))
 }
 
