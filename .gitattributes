@@ -1,0 +1,16 @@
+# Ignore the entire frontend folder (Adjust "frontend" to your actual folder name)
+frontend/** linguist-vendored
+client/** linguist-vendored
+ui/** linguist-vendored
+web/** linguist-vendored
+
+# Ignore specific web file types if they are in the root
+*.ts        linguist-vendored
+*.tsx       linguist-vendored
+*.js        linguist-vendored
+*.css       linguist-vendored
+*.html      linguist-vendored
+*.json      linguist-vendored
+
+# Force Go files to be detected (just in case)
+*.go        linguist-detectable
